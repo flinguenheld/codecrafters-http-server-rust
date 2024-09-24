@@ -1,24 +1,39 @@
-use std::io::Write;
-#[allow(unused_imports)]
-use std::net::TcpListener;
+use anyhow::Result;
+use std::{
+    io::{prelude::*, BufReader},
+    net::{TcpListener, TcpStream},
+};
 
-fn main() {
+fn main() -> Result<()> {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
     println!("Logs from your program will appear here!");
 
-    let listener = TcpListener::bind("127.0.0.1:4221").unwrap();
-
-    for stream in listener.incoming() {
-        match stream {
-            Ok(mut _stream) => {
-                let r = _stream.write_all(&"HTTP/1.1 200 OK\r\n\r\n".as_bytes());
-                dbg!(&r);
-
+    let listener = TcpListener::bind("127.0.0.1:4221")?;
+    for tcp_stream in listener.incoming() {
+        match tcp_stream {
+            Ok(mut stream) => {
                 println!("accepted new connection");
+
+                let mut reader = BufReader::new(&mut stream);
+
+                let mut line = String::new();
+                reader.read_line(&mut line)?;
+
+                if line.starts_with("GET ") {
+                    let aaa = if line.starts_with("GET / ") {
+                        "HTTP/1.1 200 OK\r\n\r\n"
+                    } else {
+                        "HTTP/1.1 404 Not Found\r\n\r\n"
+                    };
+
+                    stream.write_all(aaa.as_bytes())?;
+                }
             }
             Err(e) => {
                 println!("error: {}", e);
             }
         }
     }
+
+    Ok(())
 }
