@@ -20,13 +20,14 @@ fn main() -> Result<()> {
                 reader.read_line(&mut line)?;
 
                 if line.starts_with("GET ") {
-                    let aaa = if line.starts_with("GET / ") {
-                        "HTTP/1.1 200 OK\r\n\r\n"
-                    } else {
-                        "HTTP/1.1 404 Not Found\r\n\r\n"
-                    };
+                    if let Some(page) = line.split_whitespace().nth(1) {
+                        let response = match page {
+                            "/" => "HTTP/1.1 200 OK\r\n\r\n",
+                            _ => "HTTP/1.1 404 Not Found\r\n\r\n",
+                        };
 
-                    stream.write_all(aaa.as_bytes())?;
+                        stream.write_all(response.as_bytes())?;
+                    }
                 }
             }
             Err(e) => {
