@@ -19,13 +19,36 @@ fn main() -> Result<()> {
                 let mut line = String::new();
                 reader.read_line(&mut line)?;
 
+                let mut content: &str = "";
                 if line.starts_with("GET ") {
                     if let Some(page) = line.split_whitespace().nth(1) {
-                        let response = match page {
-                            txt if txt.starts_with("/echo/") => {
-                                &format!("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",txt.len() - 6, &txt[6..])
+                        let code = match page {
+                            p if p.starts_with("/echo/") => {
+                                content = &p[6..];
+                                200
                             }
-                            "/" => "HTTP/1.1 200 OK\r\n\r\n",
+                            _ if page.starts_with("/user-agent") => {
+                                while !line.contains("User-Agent:") {
+                                    line.clear();
+                                    reader.read_line(&mut line)?;
+                                }
+
+                                content = &line[12..line.len() - 2];
+                                200
+                            }
+                            "/" => 200,
+                            _ => 400,
+                        };
+
+                        let response = match code {
+                            200 => {
+                                if content.is_empty() {
+                                    "HTTP/1.1 200 OK\r\n\r\n"
+                                } else {
+                                    &format!("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+                                    content.len(), content)
+                                }
+                            }
                             _ => "HTTP/1.1 404 Not Found\r\n\r\n",
                         };
 
