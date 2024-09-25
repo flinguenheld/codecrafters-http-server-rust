@@ -1,7 +1,7 @@
 use anyhow::Result;
 use std::{
     io::{prelude::*, BufReader},
-    net::{TcpListener, TcpStream},
+    net::TcpListener,
 };
 
 fn main() -> Result<()> {
@@ -22,6 +22,9 @@ fn main() -> Result<()> {
                 if line.starts_with("GET ") {
                     if let Some(page) = line.split_whitespace().nth(1) {
                         let response = match page {
+                            txt if txt.starts_with("/echo/") => {
+                                &format!("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",txt.len() - 6, &txt[6..])
+                            }
                             "/" => "HTTP/1.1 200 OK\r\n\r\n",
                             _ => "HTTP/1.1 404 Not Found\r\n\r\n",
                         };
