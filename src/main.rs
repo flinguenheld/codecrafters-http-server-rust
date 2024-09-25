@@ -1,7 +1,7 @@
 use anyhow::Result;
 use std::{
     io::{prelude::*, BufReader},
-    net::TcpListener,
+    net::{TcpListener, TcpStream},
 };
 
 fn main() -> Result<()> {
@@ -14,45 +14,50 @@ fn main() -> Result<()> {
             Ok(mut stream) => {
                 println!("accepted new connection");
 
-                let mut reader = BufReader::new(&mut stream);
-
-                let mut line = String::new();
-                reader.read_line(&mut line)?;
+                let buf_reader = BufReader::new(&mut stream);
+                let lines: Vec<String> = buf_reader
+                    .lines()
+                    .map(|result| result.unwrap())
+                    .take_while(|line| !line.is_empty())
+                    .collect();
+                let mut it = lines.iter();
 
                 let mut content: &str = "";
-                if line.starts_with("GET ") {
-                    if let Some(page) = line.split_whitespace().nth(1) {
-                        let code = match page {
-                            p if p.starts_with("/echo/") => {
-                                content = &p[6..];
-                                200
-                            }
-                            _ if page.starts_with("/user-agent") => {
-                                while !line.contains("User-Agent:") {
-                                    line.clear();
-                                    reader.read_line(&mut line)?;
+                if let Some(first) = it.next() {
+                    if first.starts_with("GET ") {
+                        if let Some(page) = first.split_whitespace().nth(1) {
+                            let code = match page {
+                                p if p.starts_with("/echo/") => {
+                                    content = &p[6..];
+                                    200
                                 }
+                                _ if page.starts_with("/user-agent") => {
+                                    while let Some(line) = it.next() {
+                                        if line.contains("User-Agent:") {
+                                            content = &line[12..line.len()];
+                                        }
+                                    }
 
-                                content = &line[12..line.len() - 2];
-                                200
-                            }
-                            "/" => 200,
-                            _ => 400,
-                        };
+                                    200
+                                }
+                                "/" => 200,
+                                _ => 400,
+                            };
 
-                        let response = match code {
-                            200 => {
-                                if content.is_empty() {
-                                    "HTTP/1.1 200 OK\r\n\r\n"
-                                } else {
-                                    &format!("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+                            let response = match code {
+                                200 => {
+                                    if content.is_empty() {
+                                        "HTTP/1.1 200 OK\r\n\r\n"
+                                    } else {
+                                        &format!("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
                                     content.len(), content)
+                                    }
                                 }
-                            }
-                            _ => "HTTP/1.1 404 Not Found\r\n\r\n",
-                        };
+                                _ => "HTTP/1.1 404 Not Found\r\n\r\n",
+                            };
 
-                        stream.write_all(response.as_bytes())?;
+                            stream.write_all(response.as_bytes())?;
+                        }
                     }
                 }
             }
