@@ -2,22 +2,19 @@ use anyhow::Result;
 use std::{
     io::{prelude::*, BufReader},
     net::{TcpListener, TcpStream},
-    thread,
+    thread::{self, JoinHandle},
 };
 
 fn main() -> Result<()> {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
     println!("Logs from your program will appear here!");
 
+    let mut pool = ThreadPool::new(5);
     let listener = TcpListener::bind("127.0.0.1:4221")?;
     for tcp_stream in listener.incoming() {
-        println!("heps");
         let stream = tcp_stream?;
-        println!("accepted new connection");
 
-        thread::spawn(|| {
-            let _ = handle_connection(stream);
-        });
+        pool.execute(stream);
     }
 
     Ok(())
@@ -71,4 +68,30 @@ fn handle_connection(mut stream: TcpStream) -> Result<()> {
         }
     }
     Ok(())
+}
+
+struct ThreadPool {
+    maxi: usize,
+    currents: Vec<JoinHandle<Result<()>>>,
+}
+
+impl ThreadPool {
+    fn new(maxi: usize) -> Self {
+        Self {
+            maxi,
+            currents: Vec::new(),
+        }
+    }
+
+    fn execute(&mut self, stream: TcpStream) {
+        self.currents.retain(|jh| !jh.is_finished());
+
+        if self.currents.len() < self.maxi {
+            println!("Connection accepted");
+            self.currents
+                .push(thread::spawn(|| handle_connection(stream)));
+        } else {
+            println!("Connection refused");
+        }
+    }
 }
