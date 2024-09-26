@@ -18,8 +18,6 @@ fn main() -> Result<()> {
         }
     }
 
-    dbg!(&file_dir);
-
     let mut pool = ThreadPool::new(5);
     let listener = TcpListener::bind("127.0.0.1:4221")?;
     for tcp_stream in listener.incoming() {
@@ -35,7 +33,7 @@ fn handle_connection(mut stream: TcpStream, file_dir: String) -> Result<()> {
     let buf_reader = BufReader::new(&mut stream);
     let mut it = buf_reader.lines();
 
-    let mut content = String::new();
+    let mut message = Vec::new();
     if let Some(raw_line) = it.next() {
         let line = raw_line?;
 
@@ -43,67 +41,46 @@ fn handle_connection(mut stream: TcpStream, file_dir: String) -> Result<()> {
             if let Some(requested_page) = line.split_whitespace().nth(1) {
                 let code = match requested_page {
                     p if p.starts_with("/echo/") => {
-                        let echoed = p[6..].to_string();
-                        content = format!(
-                            "Content-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
-                            echoed.len(),
-                            echoed
-                        );
-
+                        message.push("Content-Type: text/plain".to_string());
+                        message.push(format!("Content-Length: {}\r\n", p[6..].len()));
+                        message.push(p[6..].to_string());
                         200
                     }
                     _ if requested_page.starts_with("/user-agent") => {
                         for raw_next_line in it {
-                            let next_line = raw_next_line?;
+                            let next = raw_next_line?;
 
-                            if next_line.contains("User-Agent:") {
-                                let txt = next_line[12..].to_string();
-                                content = format!(
-                                    "Content-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
-                                    txt.len(),
-                                    txt
-                                );
+                            if next.contains("User-Agent:") {
+                                message.push("Content-Type: text/plain".to_string());
+                                message.push(format!("Content-Length: {}\r\n", &next[12..].len()));
+                                message.push(next[12..].to_string());
                                 break;
                             }
                         }
-
                         200
                     }
-
                     file if requested_page.starts_with("/files/") => {
-                        dbg!(&file);
-
-                        let mut code_value = 400;
                         let p = format!("{}{}", file_dir, &file[7..]);
                         let path = Path::new(p.as_str());
 
                         if path.exists() {
                             let txt = fs::read_to_string(path)?;
-                            content = format!(
-                                "Content-Type: application/octet-stream\r\nContent-Length: {}\r\n\r\n{}",
-                                txt.len(),
-                                txt
-                            );
-
-                            code_value = 200;
+                            message.push("Content-Type: application/octet-stream".to_string());
+                            message.push(format!("Content-Length: {}\r\n", txt.len()));
+                            message.push(txt.to_string());
+                            200
+                        } else {
+                            println!("Path {} does not exist.", p);
+                            404
                         }
-
-                        code_value
                     }
-
-                    "/" => {
-                        content = "\r\n".to_string();
-
-                        200
-                    }
-                    _ => 400,
+                    "/" => 200,
+                    _ => 404,
                 };
 
-                dbg!(&content);
-
                 let response = match code {
-                    200 => &format!("HTTP/1.1 200 OK\r\n{}", content),
-                    _ => "HTTP/1.1 404 Not Found\r\n\r\n",
+                    200 => &format!("HTTP/1.1 200 OK\r\n{}\r\n", message.join("\r\n")),
+                    _ => &format!("HTTP/1.1 404 Not Found\r\n{}\r\n", message.join("\r\n")),
                 };
 
                 stream.write_all(response.as_bytes())?;
