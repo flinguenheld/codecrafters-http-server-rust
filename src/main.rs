@@ -8,6 +8,16 @@ use std::{
     thread::{self, JoinHandle},
 };
 
+#[derive(Default, Debug)]
+struct Request<'a> {
+    mode: &'a str,
+    page: &'a str,
+    user_agent: &'a str,
+    encoding: &'a str,
+    content_length: usize,
+    content: &'a str,
+}
+
 fn main() -> Result<()> {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
     println!("Logs from your program will appear here!");
@@ -41,83 +51,83 @@ fn handle_connection(mut stream: TcpStream, file_dir: String) -> Result<()> {
     // let request_string = String::from_utf8_lossy(&request[..bytes]).into_owned();
     // -----
 
-    let mut it_lines = request_string.lines();
+    let mut request = Request::default();
+    for line in request_string.lines() {
+        dbg!(&line);
+        if line.starts_with("GET ") {
+            request.mode = "GET";
+            if let Some((p, _)) = &line[4..].split_once(' ') {
+                request.page = p;
+            }
+        } else if line.starts_with("POST ") {
+            request.mode = "POST";
+            if let Some((p, _)) = &line[5..].split_once(' ') {
+                request.page = p;
+            }
+        } else if line.starts_with("User-Agent: ") {
+            request.user_agent = &line[12..];
+        } else if line.starts_with("Accept-Encoding: ") {
+            request.encoding = &line[17..];
+        } else if line.starts_with("Content-Length: ") {
+            if let Ok(value) = &line[16..].parse::<usize>() {
+                request.content_length = *value;
+            }
+        } else if !line.is_empty() && !line.contains(':') {
+            request.content = line;
+        }
+    }
+
+    dbg!(&request);
 
     let mut code = 404;
-    let mut message = Vec::new();
-    if let Some(line) = it_lines.next() {
-        if line.starts_with("GET ") {
-            if let Some(requested_page) = line.split_whitespace().nth(1) {
-                code = match requested_page {
-                    p if p.starts_with("/echo/") => {
-                        message.push("Content-Type: text/plain".to_string());
-                        message.push(format!("Content-Length: {}\r\n", p[6..].len()));
-                        message.push(p[6..].to_string());
-                        200
-                    }
-                    _ if requested_page.starts_with("/user-agent") => {
-                        for next in it_lines {
-                            if next.contains("User-Agent:") {
-                                message.push("Content-Type: text/plain".to_string());
-                                message.push(format!("Content-Length: {}\r\n", &next[12..].len()));
-                                message.push(next[12..].to_string());
-                                break;
-                            }
-                        }
-                        200
-                    }
-                    file if requested_page.starts_with("/files/") => {
-                        let p = format!("{}{}", file_dir, &file[7..]);
-                        let path = Path::new(p.as_str());
+    let mut output = Vec::new();
+    if request.mode == "GET" {
+        if request.page.starts_with("/echo/") {
+            output.push("Content-Type: text/plain".to_string());
+            output.push(format!("Content-Length: {}\r\n", request.page[6..].len()));
+            output.push(request.page[6..].to_string());
+            code = 200;
+        } else if request.page.starts_with("/user-agent") {
+            output.push("Content-Type: text/plain".to_string());
+            output.push(format!("Content-Length: {}\r\n", request.user_agent.len()));
+            output.push(request.user_agent.to_string());
+            code = 200;
+        } else if request.page.starts_with("/files/") {
+            let p = format!("{}{}", file_dir, &request.page[7..]);
+            let path = Path::new(p.as_str());
 
-                        if path.exists() {
-                            let txt = fs::read_to_string(path)?;
-                            message.push("Content-Type: application/octet-stream".to_string());
-                            message.push(format!("Content-Length: {}\r\n", txt.len()));
-                            message.push(txt.to_string());
-                            200
-                        } else {
-                            println!("Path {} does not exist.", p);
-                            404
-                        }
-                    }
-                    "/" => 200,
-                    _ => 404,
-                };
+            if path.exists() {
+                let txt = fs::read_to_string(path)?;
+                output.push("Content-Type: application/octet-stream".to_string());
+                output.push(format!("Content-Length: {}\r\n", txt.len()));
+                output.push(txt.to_string());
+                code = 200;
+            } else {
+                println!("Path {} does not exist.", p);
             }
-        } else if line.starts_with("POST /files/") {
-            let mut length = 0;
-            let mut content = String::new();
+        } else if request.page == "/" {
+            code = 200;
+        }
+    } else if request.mode == "POST" {
+        if request.page.starts_with("/files/") {
+            let file_name = &request.page[7..];
+            if request.content_length == request.content.len() && !file_name.is_empty() {
+                let path = format!("{}{}", file_dir, file_name);
+                fs::create_dir_all(file_dir)?;
+                fs::write(path, request.content)?;
 
-            if let Some((file_name, _)) = &line[12..].split_once(" ") {
-                for con in it_lines {
-                    content = con.to_string(); // File's content is at the end of the request
-
-                    if content.starts_with("Content-Length: ") {
-                        dbg!(&content);
-                        if let Ok(value) = &content[16..].parse::<usize>() {
-                            length = *value;
-                        }
-                    }
-                }
-
-                if length == content.len() && !file_name.is_empty() {
-                    let path = format!("{}{}", file_dir, file_name);
-                    fs::create_dir_all(file_dir)?;
-                    fs::write(path, content)?;
-
-                    code = 201;
-                }
+                code = 201;
             }
         }
-
-        let response = match code {
-            200 => format!("HTTP/1.1 200 OK\r\n{}\r\n", message.join("\r\n")),
-            201 => "HTTP/1.1 201 Created\r\n\r\n".to_string(),
-            _ => format!("HTTP/1.1 404 Not Found\r\n{}\r\n", message.join("\r\n")),
-        };
-        stream.write_all(response.as_bytes())?;
     }
+
+    let response = match code {
+        200 => format!("HTTP/1.1 200 OK\r\n{}\r\n", output.join("\r\n")),
+        201 => "HTTP/1.1 201 Created\r\n\r\n".to_string(),
+        _ => format!("HTTP/1.1 404 Not Found\r\n{}\r\n", output.join("\r\n")),
+    };
+    stream.write_all(response.as_bytes())?;
+    // }
     Ok(())
 }
 
