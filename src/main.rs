@@ -1,4 +1,6 @@
 use anyhow::Result;
+use flate2::write::GzEncoder;
+use flate2::Compression;
 use std::{
     env,
     fs::{self},
@@ -78,7 +80,7 @@ fn handle_connection(mut stream: TcpStream, file_dir: String) -> Result<()> {
         }
     }
 
-    dbg!(&request);
+    // dbg!(&request);
 
     // Response --
     let mut response = String::from("HTTP/1.1 404 Not Found\r\n\r\n");
@@ -87,12 +89,12 @@ fn handle_connection(mut stream: TcpStream, file_dir: String) -> Result<()> {
         if request.page.starts_with("/echo/") {
             response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n{}\r\n",
-                compress(request.encoding, &request.page[6..], &mut content)
+                compress(request.encoding, &request.page[6..], &mut content)?
             );
         } else if request.page.starts_with("/user-agent") {
             response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n{}\r\n",
-                compress(request.encoding, request.user_agent, &mut content)
+                compress(request.encoding, request.user_agent, &mut content)?
             );
         } else if request.page.starts_with("/files/") {
             let p = format!("{}{}", file_dir, &request.page[7..]);
@@ -103,7 +105,7 @@ fn handle_connection(mut stream: TcpStream, file_dir: String) -> Result<()> {
 
                 response = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n{}\r\n",
-                    compress(request.encoding, txt.as_str(), &mut content)
+                    compress(request.encoding, txt.as_str(), &mut content)?
                 );
             } else {
                 println!("Path {} does not exist.", p);
@@ -135,24 +137,34 @@ fn handle_connection(mut stream: TcpStream, file_dir: String) -> Result<()> {
     Ok(())
 }
 
-fn compress<'a>(format: Vec<&'a str>, content: &'a str, content_bytes: &mut Vec<u8>) -> String {
+/// Check the resquested compression format,
+/// Zip content into content_bytes and return a string to complete the response
+fn compress<'a>(
+    format: Vec<&'a str>,
+    content: &'a str,
+    content_bytes: &mut Vec<u8>,
+) -> Result<String> {
     for compression in format.iter() {
         match compression.to_uppercase().as_str() {
             "GZIP" => {
-                *content_bytes = content.as_bytes().to_vec();
-                return format!(
+                let mut e = GzEncoder::new(Vec::new(), Compression::default());
+                e.write_all(content.as_bytes())?;
+                *content_bytes = e.finish()?;
+
+                return Ok(format!(
                     "Content-Encoding: gzip\r\nContent-Length: {}\r\n",
                     content_bytes.len()
-                );
+                ));
             }
             _ => {} // Future modes
         }
     }
 
     *content_bytes = content.as_bytes().to_vec();
-    format!("Content-Length: {}\r\n", content_bytes.len())
+    Ok(format!("Content-Length: {}\r\n", content_bytes.len()))
 }
 
+// Multithreading --
 struct ThreadPool {
     maxi: usize,
     currents: Vec<JoinHandle<Result<()>>>,
