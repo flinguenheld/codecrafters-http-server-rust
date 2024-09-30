@@ -13,7 +13,7 @@ struct Request<'a> {
     mode: &'a str,
     page: &'a str,
     user_agent: &'a str,
-    encoding: &'a str,
+    encoding: Vec<&'a str>,
     content_length: usize,
     content: &'a str,
 }
@@ -68,7 +68,7 @@ fn handle_connection(mut stream: TcpStream, file_dir: String) -> Result<()> {
         } else if let Some(user_agent) = line.strip_prefix("User-Agent: ") {
             request.user_agent = user_agent;
         } else if let Some(encoding) = line.strip_prefix("Accept-Encoding: ") {
-            request.encoding = encoding;
+            request.encoding = encoding.split(",").map(|e| e.trim()).collect();
         } else if let Some(content_length) = line.strip_prefix("Content-Length: ") {
             if let Ok(value) = content_length.parse::<usize>() {
                 request.content_length = value;
@@ -112,8 +112,7 @@ fn handle_connection(mut stream: TcpStream, file_dir: String) -> Result<()> {
             response = "HTTP/1.1 200 OK\r\n\r\n".to_string();
         }
     } else if request.mode == "POST" {
-        if request.page.starts_with("/files/") {
-            let file_name = &request.page[7..];
+        if let Some(file_name) = request.page.strip_prefix("/files/") {
             if request.content_length == request.content.len() && !file_name.is_empty() {
                 let path = format!("{}{}", file_dir, file_name);
                 fs::create_dir_all(file_dir)?;
@@ -136,20 +135,22 @@ fn handle_connection(mut stream: TcpStream, file_dir: String) -> Result<()> {
     Ok(())
 }
 
-fn compress<'a>(format: &'a str, content: &'a str, content_bytes: &mut Vec<u8>) -> String {
-    match format.to_uppercase().as_str() {
-        "GZIP" => {
-            *content_bytes = content.as_bytes().to_vec();
-            format!(
-                "Content-Encoding: gzip\r\nContent-Length: {}\r\n",
-                content_bytes.len()
-            )
-        }
-        _ => {
-            *content_bytes = content.as_bytes().to_vec();
-            format!("Content-Length: {}\r\n", content_bytes.len())
+fn compress<'a>(format: Vec<&'a str>, content: &'a str, content_bytes: &mut Vec<u8>) -> String {
+    for compression in format.iter() {
+        match compression.to_uppercase().as_str() {
+            "GZIP" => {
+                *content_bytes = content.as_bytes().to_vec();
+                return format!(
+                    "Content-Encoding: gzip\r\nContent-Length: {}\r\n",
+                    content_bytes.len()
+                );
+            }
+            _ => {} // Future modes
         }
     }
+
+    *content_bytes = content.as_bytes().to_vec();
+    format!("Content-Length: {}\r\n", content_bytes.len())
 }
 
 struct ThreadPool {
