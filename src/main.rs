@@ -51,6 +51,7 @@ fn handle_connection(mut stream: TcpStream, file_dir: String) -> Result<()> {
     // let request_string = String::from_utf8_lossy(&request[..bytes]).into_owned();
     // -----
 
+    // Request --
     let mut request = Request::default();
     for line in request_string.lines() {
         dbg!(&line);
@@ -79,34 +80,37 @@ fn handle_connection(mut stream: TcpStream, file_dir: String) -> Result<()> {
 
     dbg!(&request);
 
-    let mut code = 404;
-    let mut output = Vec::new();
+    // Response --
+    let mut response = String::from("HTTP/1.1 404 Not Found\r\n\r\n");
     if request.mode == "GET" {
         if request.page.starts_with("/echo/") {
-            output.push("Content-Type: text/plain".to_string());
-            output.push(format!("Content-Length: {}\r\n", request.page[6..].len()));
-            output.push(request.page[6..].to_string());
-            code = 200;
+            response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+                request.page[6..].len(),
+                request.page[6..].to_string(),
+            );
         } else if request.page.starts_with("/user-agent") {
-            output.push("Content-Type: text/plain".to_string());
-            output.push(format!("Content-Length: {}\r\n", request.user_agent.len()));
-            output.push(request.user_agent.to_string());
-            code = 200;
+            response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+                request.user_agent.len(),
+                request.user_agent.to_string(),
+            );
         } else if request.page.starts_with("/files/") {
             let p = format!("{}{}", file_dir, &request.page[7..]);
             let path = Path::new(p.as_str());
 
             if path.exists() {
                 let txt = fs::read_to_string(path)?;
-                output.push("Content-Type: application/octet-stream".to_string());
-                output.push(format!("Content-Length: {}\r\n", txt.len()));
-                output.push(txt.to_string());
-                code = 200;
+                response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\n\r\n{}",
+                    txt.len(),
+                    txt.to_string(),
+                );
             } else {
                 println!("Path {} does not exist.", p);
             }
         } else if request.page == "/" {
-            code = 200;
+            response = "HTTP/1.1 200 OK\r\n\r\n".to_string();
         }
     } else if request.mode == "POST" {
         if request.page.starts_with("/files/") {
@@ -116,18 +120,12 @@ fn handle_connection(mut stream: TcpStream, file_dir: String) -> Result<()> {
                 fs::create_dir_all(file_dir)?;
                 fs::write(path, request.content)?;
 
-                code = 201;
+                response = "HTTP/1.1 201 Created\r\n\r\n".to_string();
             }
         }
     }
 
-    let response = match code {
-        200 => format!("HTTP/1.1 200 OK\r\n{}\r\n", output.join("\r\n")),
-        201 => "HTTP/1.1 201 Created\r\n\r\n".to_string(),
-        _ => format!("HTTP/1.1 404 Not Found\r\n{}\r\n", output.join("\r\n")),
-    };
     stream.write_all(response.as_bytes())?;
-    // }
     Ok(())
 }
 
