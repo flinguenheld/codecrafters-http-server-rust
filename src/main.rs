@@ -57,7 +57,7 @@ fn handle_connection(mut stream: TcpStream, file_dir: String) -> Result<()> {
         dbg!(&line);
         if line.starts_with("GET ") {
             request.mode = "GET";
-            if let Some((p, _)) = &line[4..].split_once(' ') {
+            if let Some((p, _)) = line[4..].split_once(' ') {
                 request.page = p;
             }
         } else if line.starts_with("POST ") {
@@ -82,18 +82,17 @@ fn handle_connection(mut stream: TcpStream, file_dir: String) -> Result<()> {
 
     // Response --
     let mut response = String::from("HTTP/1.1 404 Not Found\r\n\r\n");
+    let mut content: Vec<u8> = Vec::new();
     if request.mode == "GET" {
         if request.page.starts_with("/echo/") {
             response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
-                request.page[6..].len(),
-                request.page[6..].to_string(),
+                "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n{}\r\n",
+                compress(request.encoding, &request.page[6..], &mut content)
             );
         } else if request.page.starts_with("/user-agent") {
             response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
-                request.user_agent.len(),
-                request.user_agent.to_string(),
+                "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n{}\r\n",
+                compress(request.encoding, request.user_agent, &mut content)
             );
         } else if request.page.starts_with("/files/") {
             let p = format!("{}{}", file_dir, &request.page[7..]);
@@ -101,10 +100,10 @@ fn handle_connection(mut stream: TcpStream, file_dir: String) -> Result<()> {
 
             if path.exists() {
                 let txt = fs::read_to_string(path)?;
+
                 response = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\n\r\n{}",
-                    txt.len(),
-                    txt.to_string(),
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n{}\r\n",
+                    compress(request.encoding, txt.as_str(), &mut content)
                 );
             } else {
                 println!("Path {} does not exist.", p);
@@ -125,8 +124,32 @@ fn handle_connection(mut stream: TcpStream, file_dir: String) -> Result<()> {
         }
     }
 
-    stream.write_all(response.as_bytes())?;
+    let response: Vec<u8> = response
+        .as_bytes()
+        .iter()
+        .chain(content.iter())
+        .copied()
+        .collect();
+
+    stream.write_all(&response)?;
+
     Ok(())
+}
+
+fn compress<'a>(format: &'a str, content: &'a str, content_bytes: &mut Vec<u8>) -> String {
+    match format.to_uppercase().as_str() {
+        "GZIP" => {
+            *content_bytes = content.as_bytes().to_vec();
+            format!(
+                "Content-Encoding: gzip\r\nContent-Length: {}\r\n",
+                content_bytes.len()
+            )
+        }
+        _ => {
+            *content_bytes = content.as_bytes().to_vec();
+            format!("Content-Length: {}\r\n", content_bytes.len())
+        }
+    }
 }
 
 struct ThreadPool {
