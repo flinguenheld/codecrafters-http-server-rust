@@ -55,23 +55,23 @@ fn handle_connection(mut stream: TcpStream, file_dir: String) -> Result<()> {
     let mut request = Request::default();
     for line in request_string.lines() {
         dbg!(&line);
-        if line.starts_with("GET ") {
+        if let Some(page) = line.strip_prefix("GET ") {
             request.mode = "GET";
-            if let Some((p, _)) = line[4..].split_once(' ') {
+            if let Some((p, _)) = page.split_once(' ') {
                 request.page = p;
             }
-        } else if line.starts_with("POST ") {
+        } else if let Some(page) = line.strip_prefix("POST ") {
             request.mode = "POST";
-            if let Some((p, _)) = &line[5..].split_once(' ') {
+            if let Some((p, _)) = page.split_once(' ') {
                 request.page = p;
             }
-        } else if line.starts_with("User-Agent: ") {
-            request.user_agent = &line[12..];
-        } else if line.starts_with("Accept-Encoding: ") {
-            request.encoding = &line[17..];
-        } else if line.starts_with("Content-Length: ") {
-            if let Ok(value) = &line[16..].parse::<usize>() {
-                request.content_length = *value;
+        } else if let Some(user_agent) = line.strip_prefix("User-Agent: ") {
+            request.user_agent = user_agent;
+        } else if let Some(encoding) = line.strip_prefix("Accept-Encoding: ") {
+            request.encoding = encoding;
+        } else if let Some(content_length) = line.strip_prefix("Content-Length: ") {
+            if let Ok(value) = content_length.parse::<usize>() {
+                request.content_length = value;
             }
         } else if !line.is_empty() && !line.contains(':') {
             request.content = line;
