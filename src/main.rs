@@ -21,9 +21,6 @@ struct Request<'a> {
 }
 
 fn main() -> Result<()> {
-    // You can use print statements as follows for debugging, they'll be visible when running tests.
-    println!("Logs from your program will appear here!");
-
     let mut file_dir = String::new();
     if let Some(a) = env::args().position(|a| a == "--directory") {
         if let Some(dir) = env::args().nth(a + 1) {
